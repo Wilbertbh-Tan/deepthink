@@ -113,23 +113,18 @@ async def _load_tree_or_404(tree_id: str) -> BlockTree:
 async def create_tree(req: CreateTreeRequest):
     tree_id = str(uuid.uuid4())
 
-    # Split text into blocks
-    raw_blocks = llm_service.split_text_into_blocks(req.text)
+    # Agentic loop: LLM reads full text, decides blocks + generates questions
+    created_blocks = await llm_service.create_blocks(req.text, req.num_questions)
 
-    # Generate questions for all blocks concurrently
-    all_questions = await llm_service.generate_questions_for_blocks(
-        raw_blocks, req.num_questions
-    )
-
-    # Build tree structure
+    # Build tree structure from LLM-created blocks
     blocks = []
-    for i, (content, questions) in enumerate(zip(raw_blocks, all_questions)):
+    for i, cb in enumerate(created_blocks):
         block_id = f"{tree_id}-b{i}"
         q_blocks = [
             QuestionBlock(id=f"{block_id}-q{j}", content=q)
-            for j, q in enumerate(questions)
+            for j, q in enumerate(cb.questions)
         ]
-        blocks.append(TitleBlock(id=block_id, content=content, questions=q_blocks))
+        blocks.append(TitleBlock(id=block_id, content=cb.content, questions=q_blocks))
 
     tree = BlockTree(
         id=tree_id,

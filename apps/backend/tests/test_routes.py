@@ -21,14 +21,15 @@ async def test_create_tree(client, mock_s3, mock_llm):
     assert len(data["blocks"][0]["questions"]) == 2
     assert len(data["blocks"][1]["questions"]) == 2
     mock_s3["save"].assert_awaited_once()
-    mock_llm["split"].assert_called_once()
-    mock_llm["gen_for_blocks"].assert_awaited_once()
+    mock_llm["create"].assert_awaited_once()
 
 
 async def test_create_tree_custom_num_questions(client, mock_s3, mock_llm):
-    mock_llm["gen_for_blocks"].return_value = [
-        ["Q1?", "Q2?", "Q3?"],
-        ["Q4?", "Q5?", "Q6?"],
+    from apps.backend.models import CreateBlockInput
+
+    mock_llm["create"].return_value = [
+        CreateBlockInput(content="Block one.", questions=["Q1?", "Q2?", "Q3?"]),
+        CreateBlockInput(content="Block two.", questions=["Q4?", "Q5?", "Q6?"]),
     ]
     resp = await client.post(
         "/api/trees",
@@ -40,6 +41,7 @@ async def test_create_tree_custom_num_questions(client, mock_s3, mock_llm):
     )
     assert resp.status_code == 200
     assert resp.json()["num_questions"] == 3
+    assert len(resp.json()["blocks"][0]["questions"]) == 3
 
 
 # --- GET /api/trees ---

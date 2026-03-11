@@ -34,6 +34,15 @@ class BlockTree(BaseModel):
 # --- LLM structured output models ---
 
 
+class CreateBlockInput(BaseModel):
+    content: str = Field(
+        description="The text content for this block, quoted verbatim from the original writing."
+    )
+    questions: list[str] = Field(
+        description="Thought-provoking questions about this block."
+    )
+
+
 class QuestionsResponse(BaseModel):
     questions: list[str]
 

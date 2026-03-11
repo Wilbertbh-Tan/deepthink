@@ -1,25 +1,17 @@
 import asyncio
-import re
+import random
 from functools import lru_cache
 from pathlib import Path
 
-from openai import AsyncOpenAI
+import anthropic
 
 from .config import get_settings
-from .models import EvaluationResponse, QuestionsResponse
+from .models import CreateBlockInput, EvaluationResponse, QuestionsResponse
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-
-def _response_format(name: str, model_class):
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": name,
-            "strict": True,
-            "schema": model_class.model_json_schema(),
-        },
-    }
+MAX_RETRIES = 5
+MAX_AGENT_TURNS = 20
 
 
 @lru_cache
@@ -27,12 +19,100 @@ def _load_prompt(name: str) -> str:
     return (PROMPTS_DIR / f"{name}.md").read_text()
 
 
-def _get_client() -> AsyncOpenAI:
+def _get_client() -> anthropic.AsyncAnthropic:
     settings = get_settings()
-    return AsyncOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.openrouter_api_key,
-    )
+    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+
+
+CREATE_BLOCK_TOOL = {
+    "name": "create_block",
+    "description": "Create a block from the writing with its questions. Call this once per block.",
+    "input_schema": CreateBlockInput.model_json_schema(),
+}
+
+QUESTIONS_TOOL = {
+    "name": "return_questions",
+    "description": "Return the generated questions.",
+    "input_schema": QuestionsResponse.model_json_schema(),
+}
+
+EVALUATION_TOOL = {
+    "name": "return_evaluation",
+    "description": "Return the evaluation score and feedback.",
+    "input_schema": EvaluationResponse.model_json_schema(),
+}
+
+
+async def _call_with_retry(coro_fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    """Call an async function with exponential backoff on rate limit errors."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except anthropic.RateLimitError:
+            if attempt == MAX_RETRIES - 1:
+                raise
+            wait = (2**attempt) + random.uniform(0, 1)
+            await asyncio.sleep(wait)
+
+
+async def create_blocks(text: str, num_questions: int) -> list[CreateBlockInput]:
+    """Agentic loop: LLM reads full text, creates blocks with questions via tool calls."""
+    client = _get_client()
+    settings = get_settings()
+
+    messages: list[dict] = [
+        {
+            "role": "user",
+            "content": _load_prompt("create_blocks_user").format(
+                num_questions=num_questions, text=text
+            ),
+        },
+    ]
+
+    blocks: list[CreateBlockInput] = []
+
+    for _ in range(MAX_AGENT_TURNS):
+        resp = await _call_with_retry(
+            client.messages.create,
+            model=settings.llm_model,
+            max_tokens=4096,
+            system=_load_prompt("create_blocks_system"),
+            messages=messages,
+            tools=[CREATE_BLOCK_TOOL],
+        )
+
+        # Collect tool calls from this turn
+        tool_uses = [b for b in resp.content if b.type == "tool_use"]
+
+        if not tool_uses:
+            # Model is done — no more tool calls
+            break
+
+        for tool_use in tool_uses:
+            if tool_use.name == "create_block":
+                block = CreateBlockInput.model_validate(tool_use.input)
+                blocks.append(block)
+
+        # Send tool results back so the model can continue
+        messages.append({"role": "assistant", "content": resp.content})
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_use.id,
+                        "content": "Block created.",
+                    }
+                    for tool_use in tool_uses
+                ],
+            }
+        )
+
+        if resp.stop_reason == "end_turn":
+            break
+
+    return blocks
 
 
 async def generate_questions(
@@ -40,7 +120,7 @@ async def generate_questions(
     num_questions: int,
     existing_questions: list[str] | None = None,
 ) -> list[str]:
-    """Generate questions for a piece of text."""
+    """Generate additional questions for an existing block."""
     client = _get_client()
     settings = get_settings()
 
@@ -53,13 +133,12 @@ async def generate_questions(
     else:
         existing_section = ""
 
-    resp = await client.chat.completions.create(
+    resp = await _call_with_retry(
+        client.messages.create,
         model=settings.llm_model,
+        max_tokens=1024,
+        system=_load_prompt("generate_questions_system"),
         messages=[
-            {
-                "role": "system",
-                "content": _load_prompt("generate_questions_system"),
-            },
             {
                 "role": "user",
                 "content": _load_prompt("generate_questions_user").format(
@@ -69,13 +148,16 @@ async def generate_questions(
                 ),
             },
         ],
-        response_format=_response_format("questions", QuestionsResponse),
+        tools=[QUESTIONS_TOOL],
+        tool_choice={"type": "tool", "name": "return_questions"},
     )
 
-    data = QuestionsResponse.model_validate_json(
-        resp.choices[0].message.content or '{"questions": []}'
-    )
-    return data.questions[:num_questions]
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "return_questions":
+            data = QuestionsResponse.model_validate(block.input)
+            return data.questions[:num_questions]
+
+    return []
 
 
 async def evaluate_answer(
@@ -85,13 +167,12 @@ async def evaluate_answer(
     client = _get_client()
     settings = get_settings()
 
-    resp = await client.chat.completions.create(
+    resp = await _call_with_retry(
+        client.messages.create,
         model=settings.llm_model,
+        max_tokens=1024,
+        system=_load_prompt("evaluate_answer_system"),
         messages=[
-            {
-                "role": "system",
-                "content": _load_prompt("evaluate_answer_system"),
-            },
             {
                 "role": "user",
                 "content": _load_prompt("evaluate_answer_user").format(
@@ -99,23 +180,12 @@ async def evaluate_answer(
                 ),
             },
         ],
-        response_format=_response_format("evaluation", EvaluationResponse),
+        tools=[EVALUATION_TOOL],
+        tool_choice={"type": "tool", "name": "return_evaluation"},
     )
 
-    return EvaluationResponse.model_validate_json(
-        resp.choices[0].message.content or '{"score": 0, "feedback": ""}'
-    )
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "return_evaluation":
+            return EvaluationResponse.model_validate(block.input)
 
-
-def split_text_into_blocks(text: str) -> list[str]:
-    """Split markdown text into blocks based on double newlines or headings."""
-    raw_blocks = re.split(r"\n{2,}", text.strip())
-    return [b.strip() for b in raw_blocks if b.strip()]
-
-
-async def generate_questions_for_blocks(
-    blocks: list[str], num_questions: int
-) -> list[list[str]]:
-    """Generate questions for multiple blocks concurrently."""
-    tasks = [generate_questions(block, num_questions) for block in blocks]
-    return await asyncio.gather(*tasks)
+    return EvaluationResponse(score=0, feedback="")

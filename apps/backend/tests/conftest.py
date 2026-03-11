@@ -7,6 +7,7 @@ from apps.backend.main import app
 from apps.backend.models import (
     AnswerBlock,
     BlockTree,
+    CreateBlockInput,
     EvaluationResponse,
     QuestionBlock,
     TitleBlock,
@@ -85,11 +86,10 @@ def mock_s3():
 def mock_llm():
     """Mock all LLM service functions."""
     with (
-        patch("apps.backend.routes.llm_service.split_text_into_blocks") as split,
         patch(
-            "apps.backend.routes.llm_service.generate_questions_for_blocks",
+            "apps.backend.routes.llm_service.create_blocks",
             new_callable=AsyncMock,
-        ) as gen_for_blocks,
+        ) as create,
         patch(
             "apps.backend.routes.llm_service.generate_questions",
             new_callable=AsyncMock,
@@ -99,16 +99,20 @@ def mock_llm():
             new_callable=AsyncMock,
         ) as evaluate,
     ):
-        split.return_value = ["Block one content.", "Block two content."]
-        gen_for_blocks.return_value = [
-            ["Question 1?", "Question 2?"],
-            ["Question 3?", "Question 4?"],
+        create.return_value = [
+            CreateBlockInput(
+                content="Block one content.",
+                questions=["Question 1?", "Question 2?"],
+            ),
+            CreateBlockInput(
+                content="Block two content.",
+                questions=["Question 3?", "Question 4?"],
+            ),
         ]
         gen.return_value = ["New question?"]
         evaluate.return_value = EvaluationResponse(score=85, feedback="Great answer.")
         yield {
-            "split": split,
-            "gen_for_blocks": gen_for_blocks,
+            "create": create,
             "gen": gen,
             "evaluate": evaluate,
         }
