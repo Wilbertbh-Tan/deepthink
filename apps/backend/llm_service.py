@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import random
 from functools import lru_cache
 from pathlib import Path
@@ -7,6 +8,8 @@ import anthropic
 
 from .config import get_settings
 from .models import CreateBlockInput, EvaluationResponse, QuestionsResponse
+
+logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -52,6 +55,12 @@ async def _call_with_retry(coro_fn, *args, **kwargs):  # type: ignore[no-untyped
             if attempt == MAX_RETRIES - 1:
                 raise
             wait = (2**attempt) + random.uniform(0, 1)
+            logger.warning(
+                "Rate limited — retrying in %.1fs (attempt %d/%d)",
+                wait,
+                attempt + 1,
+                MAX_RETRIES,
+            )
             await asyncio.sleep(wait)
 
 
@@ -71,7 +80,8 @@ async def create_blocks(text: str, num_questions: int) -> list[CreateBlockInput]
 
     blocks: list[CreateBlockInput] = []
 
-    for _ in range(MAX_AGENT_TURNS):
+    for turn in range(MAX_AGENT_TURNS):
+        logger.info("create_blocks turn %d — calling LLM...", turn + 1)
         resp = await _call_with_retry(
             client.messages.create,
             model=settings.llm_model,
@@ -85,13 +95,22 @@ async def create_blocks(text: str, num_questions: int) -> list[CreateBlockInput]
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
 
         if not tool_uses:
-            # Model is done — no more tool calls
+            logger.info(
+                "create_blocks — LLM done (no tool calls), total blocks: %d",
+                len(blocks),
+            )
             break
 
         for tool_use in tool_uses:
             if tool_use.name == "create_block":
                 block = CreateBlockInput.model_validate(tool_use.input)
                 blocks.append(block)
+                logger.info(
+                    "create_blocks — block %d created (%d questions, %d chars)",
+                    len(blocks),
+                    len(block.questions),
+                    len(block.content),
+                )
 
         # Send tool results back so the model can continue
         messages.append({"role": "assistant", "content": resp.content})
@@ -110,6 +129,9 @@ async def create_blocks(text: str, num_questions: int) -> list[CreateBlockInput]
         )
 
         if resp.stop_reason == "end_turn":
+            logger.info(
+                "create_blocks — LLM signalled end_turn, total blocks: %d", len(blocks)
+            )
             break
 
     return blocks
@@ -121,6 +143,7 @@ async def generate_questions(
     existing_questions: list[str] | None = None,
 ) -> list[str]:
     """Generate additional questions for an existing block."""
+    logger.info("generate_questions — requesting %d questions", num_questions)
     client = _get_client()
     settings = get_settings()
 
@@ -164,6 +187,7 @@ async def evaluate_answer(
     question: str, answer: str, context: str
 ) -> EvaluationResponse:
     """Evaluate an answer and return score + feedback."""
+    logger.info("evaluate_answer — scoring answer (%d chars)", len(answer))
     client = _get_client()
     settings = get_settings()
 

@@ -1,10 +1,10 @@
+import logging
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from . import llm_service
-from . import s3_service
+from . import llm_service, s3_service
 from .models import (
     AnswerBlock,
     BlockTree,
@@ -16,6 +16,8 @@ from .models import (
     TitleBlock,
     TreeListItem,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -112,9 +114,11 @@ async def _load_tree_or_404(tree_id: str) -> BlockTree:
 @router.post("/trees", response_model=BlockTree)
 async def create_tree(req: CreateTreeRequest):
     tree_id = str(uuid.uuid4())
+    logger.info("Creating tree %s — calling LLM to generate blocks...", tree_id)
 
     # Agentic loop: LLM reads full text, decides blocks + generates questions
     created_blocks = await llm_service.create_blocks(req.text, req.num_questions)
+    logger.info("Tree %s — LLM returned %d blocks", tree_id, len(created_blocks))
 
     # Build tree structure from LLM-created blocks
     blocks = []
@@ -232,6 +236,12 @@ async def submit_answer(tree_id: str, question_id: str, req: SubmitAnswerRequest
     # Resubmitting wipes score, feedback, and all child questions
     answer_id = f"{question_id}-a"
     question.answer = AnswerBlock(id=answer_id, content=req.content)
+
+    # Auto-evaluate the answer
+    context = _get_context_for_question(tree, question_id)
+    result = await llm_service.evaluate_answer(question.content, req.content, context)
+    question.answer.score = result.score
+    question.answer.feedback = result.feedback
 
     await s3_service.save_tree(tree_id, tree.model_dump())
     return tree

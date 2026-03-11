@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
-  CheckCircle,
   MessageSquare,
   PenLine,
   Plus,
@@ -15,7 +15,6 @@ import { Separator } from "@workspace/ui/components/separator";
 import type { QuestionBlock, BlockTree } from "@/lib/api";
 import {
   submitAnswer,
-  evaluateAnswer,
   generateQuestions,
 } from "@/lib/api";
 import { AnswerForm } from "./answer-form";
@@ -33,23 +32,17 @@ export function QuestionBlockView({
   onTreeUpdate,
   depth = 0,
 }: QuestionBlockViewProps) {
-  const [evaluating, setEvaluating] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [rewriting, setRewriting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmitAnswer(content: string) {
-    const updated = await submitAnswer(treeId, question.id, content);
-    onTreeUpdate(updated);
-  }
-
-  async function handleEvaluate() {
-    if (!question.answer) return;
-    setEvaluating(true);
+    setSubmitting(true);
     try {
-      const updated = await evaluateAnswer(treeId, question.answer.id);
+      const updated = await submitAnswer(treeId, question.id, content);
       onTreeUpdate(updated);
     } finally {
-      setEvaluating(false);
+      setSubmitting(false);
     }
   }
 
@@ -73,7 +66,12 @@ export function QuestionBlockView({
         <p className="text-sm font-medium">{question.content}</p>
       </div>
 
-      {question.answer ? (
+      {submitting ? (
+        <div className="ml-6 flex items-center gap-2 py-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Evaluating your answer...
+        </div>
+      ) : question.answer ? (
         <div className="ml-6">
           <div className="bg-muted/50 rounded-md p-3">
             <p className="text-sm whitespace-pre-wrap">
@@ -95,28 +93,13 @@ export function QuestionBlockView({
             )}
 
             {question.answer.feedback && (
-              <p className="text-muted-foreground mt-2 text-xs italic">
-                {question.answer.feedback}
-              </p>
+              <div className="text-muted-foreground mt-2 text-sm [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_strong]:text-foreground [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-sm [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_code]:bg-muted [&_code]:px-1 [&_code]:rounded">
+                <ReactMarkdown>{question.answer.feedback}</ReactMarkdown>
+              </div>
             )}
           </div>
 
           <div className="mt-2 flex gap-2">
-            {question.answer.score === null && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleEvaluate}
-                disabled={evaluating}
-              >
-                {evaluating ? (
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                ) : (
-                  <CheckCircle className="mr-1 h-3 w-3" />
-                )}
-                Evaluate
-              </Button>
-            )}
             <Button
               variant="outline"
               size="sm"
