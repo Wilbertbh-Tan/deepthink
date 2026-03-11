@@ -1,5 +1,7 @@
 import pytest
 
+from models import QuestionBlock
+
 
 pytestmark = pytest.mark.anyio
 
@@ -172,14 +174,25 @@ async def test_submit_answer(client, mock_s3, sample_tree):
     mock_s3["save"].assert_awaited_once()
 
 
-async def test_submit_answer_already_answered(client, mock_s3, answered_tree):
+async def test_resubmit_answer_replaces_and_wipes_children(
+    client, mock_s3, answered_tree
+):
+    # Add a child question to the existing answer
+    answered_tree.blocks[0].questions[0].answer.children_questions = [
+        QuestionBlock(id="child-q", content="Child question?")
+    ]
     mock_s3["load"].return_value = answered_tree.model_dump()
     resp = await client.post(
         "/api/trees/tree-1/questions/tree-1-b0-q0/answer",
-        json={"content": "Another answer."},
+        json={"content": "Rewritten answer."},
     )
-    assert resp.status_code == 400
-    assert "already answered" in resp.json()["detail"]
+    assert resp.status_code == 200
+    answer = resp.json()["blocks"][0]["questions"][0]["answer"]
+    assert answer["content"] == "Rewritten answer."
+    assert answer["score"] is None
+    assert answer["feedback"] is None
+    assert answer["children_questions"] == []
+    mock_s3["save"].assert_awaited_once()
 
 
 async def test_submit_answer_question_not_found(client, mock_s3, sample_tree):

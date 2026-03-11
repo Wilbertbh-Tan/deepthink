@@ -1,16 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Send } from "lucide-react";
+import { Send, X } from "lucide-react";
 import { Button } from "@workspace/ui/components/button";
 import { Textarea } from "@workspace/ui/components/textarea";
 
 interface AnswerFormProps {
   onSubmit: (content: string) => Promise<void>;
+  onCancel?: () => void;
+  initialValue?: string;
 }
 
-export function AnswerForm({ onSubmit }: AnswerFormProps) {
-  const [content, setContent] = useState("");
+export function AnswerForm({ onSubmit, onCancel, initialValue = "" }: AnswerFormProps) {
+  const [content, setContent] = useState(initialValue);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -34,15 +36,28 @@ export function AnswerForm({ onSubmit }: AnswerFormProps) {
         rows={3}
         className="text-sm"
       />
-      <Button
-        type="submit"
-        size="sm"
-        disabled={loading || !content.trim()}
-        className="self-start"
-      >
-        <Send className="mr-1 h-3 w-3" />
-        {loading ? "Submitting..." : "Submit Answer"}
-      </Button>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          disabled={loading || !content.trim()}
+        >
+          <Send className="mr-1 h-3 w-3" />
+          {loading ? "Submitting..." : "Submit Answer"}
+        </Button>
+        {onCancel && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            disabled={loading}
+          >
+            <X className="mr-1 h-3 w-3" />
+            Cancel
+          </Button>
+        )}
+      </div>
     </form>
   );
 }

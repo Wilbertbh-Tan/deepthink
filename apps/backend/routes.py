@@ -233,9 +233,8 @@ async def submit_answer(tree_id: str, question_id: str, req: SubmitAnswerRequest
     question = _find_question(tree, question_id)
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
-    if question.answer is not None:
-        raise HTTPException(status_code=400, detail="Question already answered")
 
+    # Resubmitting wipes score, feedback, and all child questions
     answer_id = f"{question_id}-a"
     question.answer = AnswerBlock(id=answer_id, content=req.content)
 

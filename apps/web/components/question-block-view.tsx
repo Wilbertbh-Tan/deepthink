@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   CheckCircle,
   MessageSquare,
+  PenLine,
   Plus,
   Star,
   Loader2,
@@ -34,6 +35,7 @@ export function QuestionBlockView({
 }: QuestionBlockViewProps) {
   const [evaluating, setEvaluating] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [rewriting, setRewriting] = useState(false);
 
   async function handleSubmitAnswer(content: string) {
     const updated = await submitAnswer(treeId, question.id, content);
@@ -128,7 +130,28 @@ export function QuestionBlockView({
               )}
               More Questions
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRewriting(true)}
+            >
+              <PenLine className="mr-1 h-3 w-3" />
+              Rewrite
+            </Button>
           </div>
+
+          {rewriting && (
+            <div className="mt-2">
+              <AnswerForm
+                onSubmit={async (content) => {
+                  await handleSubmitAnswer(content);
+                  setRewriting(false);
+                }}
+                onCancel={() => setRewriting(false)}
+                initialValue={question.answer.content}
+              />
+            </div>
+          )}
 
           {question.answer.children_questions.length > 0 && (
             <div className="mt-3">
