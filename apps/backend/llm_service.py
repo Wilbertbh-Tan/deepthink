@@ -1,5 +1,4 @@
 import asyncio
-import json
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -7,8 +6,20 @@ from pathlib import Path
 from openai import AsyncOpenAI
 
 from config import get_settings
+from models import EvaluationResponse, QuestionsResponse
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def _response_format(name: str, model_class):
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": True,
+            "schema": model_class.model_json_schema(),
+        },
+    }
 
 
 @lru_cache
@@ -43,19 +54,18 @@ async def generate_questions(content: str, num_questions: int) -> list[str]:
                 ),
             },
         ],
+        response_format=_response_format("questions", QuestionsResponse),
     )
 
-    raw = resp.choices[0].message.content or "[]"
-    # Strip markdown code fences if present
-    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-    raw = re.sub(r"\s*```$", "", raw.strip())
-    questions: list[str] = json.loads(raw)
-    return questions[:num_questions]
+    data = QuestionsResponse.model_validate_json(
+        resp.choices[0].message.content or '{"questions": []}'
+    )
+    return data.questions[:num_questions]
 
 
 async def evaluate_answer(
     question: str, answer: str, context: str
-) -> dict[str, float | str]:
+) -> dict[str, int | str]:
     """Evaluate an answer and return score + feedback."""
     client = _get_client()
     settings = get_settings()
@@ -74,19 +84,18 @@ async def evaluate_answer(
                 ),
             },
         ],
+        response_format=_response_format("evaluation", EvaluationResponse),
     )
 
-    raw = resp.choices[0].message.content or '{}'
-    raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-    raw = re.sub(r"\s*```$", "", raw.strip())
-    return json.loads(raw)
+    data = EvaluationResponse.model_validate_json(
+        resp.choices[0].message.content or '{"score": 0, "feedback": ""}'
+    )
+    return data.model_dump()
 
 
 def split_text_into_blocks(text: str) -> list[str]:
     """Split markdown text into blocks based on double newlines or headings."""
-    # Split on double newlines
     raw_blocks = re.split(r"\n{2,}", text.strip())
-    # Filter out empty blocks
     return [b.strip() for b in raw_blocks if b.strip()]
 
 

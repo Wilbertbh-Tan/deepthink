@@ -31,6 +31,18 @@ class BlockTree(BaseModel):
     num_questions: int = 2
 
 
+# --- LLM structured output models ---
+
+
+class QuestionsResponse(BaseModel):
+    questions: list[str]
+
+
+class EvaluationResponse(BaseModel):
+    score: int
+    feedback: str
+
+
 # --- Request / Response models ---
 
 
