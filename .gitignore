@@ -37,3 +37,4 @@ npm-debug.log*
 /apps/backend/__pycache__
 /apps/backend/tests/__pycache__
 /exports
+/data

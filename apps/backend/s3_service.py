@@ -4,6 +4,14 @@ import json
 import boto3
 
 from .config import get_settings
+from . import local_storage
+
+
+def _s3_configured() -> bool:
+    settings = get_settings()
+    return bool(
+        settings.s3_api and settings.s3_api_access_key_id and settings.s3_api_secret
+    )
 
 
 def _client():
@@ -18,6 +26,9 @@ def _client():
 
 
 async def save_tree(tree_id: str, tree_data: dict) -> None:
+    if not _s3_configured():
+        return await local_storage.save_tree(tree_id, tree_data)
+
     def _put():
         settings = get_settings()
         _client().put_object(
@@ -31,6 +42,9 @@ async def save_tree(tree_id: str, tree_data: dict) -> None:
 
 
 async def load_tree(tree_id: str) -> dict | None:
+    if not _s3_configured():
+        return await local_storage.load_tree(tree_id)
+
     def _get():
         settings = get_settings()
         try:
@@ -46,6 +60,9 @@ async def load_tree(tree_id: str) -> dict | None:
 
 
 async def list_trees() -> list[dict]:
+    if not _s3_configured():
+        return await local_storage.list_trees()
+
     def _list():
         settings = get_settings()
         client = _client()
@@ -64,6 +81,9 @@ async def list_trees() -> list[dict]:
 
 
 async def delete_tree(tree_id: str) -> None:
+    if not _s3_configured():
+        return await local_storage.delete_tree(tree_id)
+
     def _delete():
         settings = get_settings()
         _client().delete_object(
