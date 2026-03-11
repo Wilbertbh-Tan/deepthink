@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   MessageSquare,
@@ -32,17 +32,22 @@ export function QuestionBlockView({
   onTreeUpdate,
   depth = 0,
 }: QuestionBlockViewProps) {
+  const blockRef = useRef<HTMLDivElement>(null);
   const [generating, setGenerating] = useState(false);
   const [rewriting, setRewriting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
 
   async function handleSubmitAnswer(content: string) {
+    setPendingAnswer(content);
     setSubmitting(true);
+    blockRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
       const updated = await submitAnswer(treeId, question.id, content);
       onTreeUpdate(updated);
     } finally {
       setSubmitting(false);
+      setPendingAnswer(null);
     }
   }
 
@@ -59,6 +64,7 @@ export function QuestionBlockView({
 
   return (
     <div
+      ref={blockRef}
       className={`border-l-2 pl-4 ${depth > 0 ? "border-muted ml-2" : "border-primary/30"}`}
     >
       <div className="flex items-start gap-2 py-2">
@@ -67,9 +73,14 @@ export function QuestionBlockView({
       </div>
 
       {submitting ? (
-        <div className="ml-6 flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Evaluating your answer...
+        <div className="ml-6">
+          <div className="bg-muted/50 rounded-md p-3">
+            <p className="text-sm whitespace-pre-wrap">{pendingAnswer}</p>
+          </div>
+          <div className="flex items-center gap-2 mt-2 py-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Evaluating your answer...
+          </div>
         </div>
       ) : question.answer ? (
         <div className="ml-6">
