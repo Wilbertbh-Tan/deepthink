@@ -23,6 +23,10 @@ Objects:
 - QuestionBlock
 - AnswerBlock
 
+# Requirements
+- Anthropic API key
+- S3 bucket info
+
 # Run
 ```
 uv run fastapi dev apps/backend/main.py
