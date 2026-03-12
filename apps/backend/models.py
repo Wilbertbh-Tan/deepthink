@@ -3,6 +3,9 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+# --- Core tree models ---
+
+
 class AnswerBlock(BaseModel):
     id: str
     content: str
@@ -32,15 +35,16 @@ class BlockTree(BaseModel):
 
 
 # --- LLM structured output models ---
+# TODO(human): Add the models that define what the LLM returns.
+# You need three models:
+# 1. CreateBlockInput - what the LLM returns when splitting text (content + questions)
+# 2. QuestionsResponse - what the LLM returns when generating questions
+# 3. EvaluationResponse - what the LLM returns when scoring an answer (score + feedback)
 
 
 class CreateBlockInput(BaseModel):
-    content: str = Field(
-        description="The text content for this block, quoted verbatim from the original writing."
-    )
-    questions: list[str] = Field(
-        description="Thought-provoking questions about this block."
-    )
+    content: str
+    questions: list[str]
 
 
 class QuestionsResponse(BaseModel):
@@ -53,8 +57,6 @@ class EvaluationResponse(BaseModel):
 
 
 # --- Request / Response models ---
-
-
 class CreateTreeRequest(BaseModel):
     title: str
     text: str
@@ -67,10 +69,6 @@ class SubmitAnswerRequest(BaseModel):
 
 class GenerateQuestionsRequest(BaseModel):
     num_questions: int = 2
-
-
-class EvaluateAnswerRequest(BaseModel):
-    pass  # no body needed; we already know the answer from the tree
 
 
 class TreeListItem(BaseModel):
