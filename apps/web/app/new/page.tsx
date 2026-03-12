@@ -1,104 +1,78 @@
-"use client";
+"use client"
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@workspace/ui/components/button";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@workspace/ui/components/card";
-import { Input } from "@workspace/ui/components/input";
-import { Textarea } from "@workspace/ui/components/textarea";
-import { createTree } from "@/lib/api";
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { createTree } from "../../lib/api"
+import { Button } from "@workspace/ui/components/button"
+import { Input } from "@workspace/ui/components/input"
+import { Textarea } from "@workspace/ui/components/textarea"
+import Link from "next/link"
 
-export default function NewTreePage() {
-  const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [text, setText] = useState("");
-  const [numQuestions, setNumQuestions] = useState(2);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+export default function NewTree() {
+    const router = useRouter()
+    const [title, setTitle] = useState("")
+    const [content, setContent] = useState("")
+    const [numQuestions, setNumQuestions] = useState(3)
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState("")
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim() || !text.trim()) return;
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault()
+        setLoading(true)
+        setError("")
 
-    setLoading(true);
-    setError("");
-    try {
-      const tree = await createTree(title, text, numQuestions);
-      router.push(`/trees/${tree.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create tree");
-    } finally {
-      setLoading(false);
+        try {
+            const tree = await createTree(title, content, numQuestions)
+            router.push(`/trees/${tree.id}`)
+        } catch (err) {
+            setError("Failed to create tree")
+            setLoading(false)
+        }
     }
-  }
 
-  return (
-    <div className="mx-auto max-w-3xl p-6">
-      <Link href="/" className="text-muted-foreground mb-6 inline-flex items-center gap-1 text-sm hover:underline">
-        <ArrowLeft className="h-4 w-4" />
-        Back to dashboard
-      </Link>
+    return (
+        <div>
+            <Link href="/" className="text-muted-foreground hover:underline text-sm">
+                ← Back
+            </Link>
+            <h1 className="text-3xl font-bold mt-4 mb-8">New Tree</h1>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>New Writing</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium">Title</label>
-              <Input
-                placeholder="e.g. My essay on consciousness"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium">
-                Text (markdown)
-              </label>
-              <Textarea
-                placeholder="Paste your writing here..."
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={12}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium">
-                Questions per block
-              </label>
-              <Input
-                type="number"
-                min={1}
-                max={10}
-                value={numQuestions}
-                onChange={(e) => setNumQuestions(Number(e.target.value))}
-                className="w-24"
-              />
-            </div>
-
-            {error && (
-              <p className="text-sm text-red-500">{error}</p>
-            )}
-
-            <Button type="submit" disabled={loading} className="self-start">
-              {loading ? "Creating..." : "Create & Generate Questions"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
+            <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Title</label>
+                    <Input
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="Give your writing a title"
+                        required
+                    />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Content</label>
+                    <Textarea
+                        value={content}
+                        onChange={(e) => setContent(e.target.value)}
+                        rows={10}
+                        placeholder="Paste or write your text here..."
+                        required
+                    />
+                </div>
+                <div className="space-y-2">
+                    <label className="text-sm font-medium">Questions per block</label>
+                    <Input
+                        type="number"
+                        value={numQuestions}
+                        onChange={(e) => setNumQuestions(Number(e.target.value))}
+                        min={1}
+                        max={10}
+                        className="w-24"
+                    />
+                </div>
+                {error && <p className="text-red-500 text-sm">{error}</p>}
+                <Button type="submit" disabled={loading}>
+                    {loading ? "Creating..." : "Create Tree"}
+                </Button>
+            </form>
+        </div>
+    )
 }
