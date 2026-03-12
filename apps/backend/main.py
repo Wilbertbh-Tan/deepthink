@@ -18,10 +18,8 @@ from .routes import router  # noqa: E402
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = get_settings()
-    if not settings.anthropic_api_key:
-        print("WARNING: ANTHROPIC_API_KEY is not set — LLM calls will fail")
-    if not settings.s3_api:
-        print("WARNING: S3_API is not set — S3 operations will fail")
+    if not settings.openrouter_api_key:
+        print("WARNING: OPENROUTER_API_KEY is not set — LLM calls will fail")
     yield
 
 

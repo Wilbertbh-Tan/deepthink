@@ -1,215 +1,140 @@
-import asyncio
-import logging
-import random
-from functools import lru_cache
+import json
 from pathlib import Path
 
-import anthropic
+from openai import OpenAI
 
 from .config import get_settings
 from .models import CreateBlockInput, EvaluationResponse, QuestionsResponse
 
-logger = logging.getLogger(__name__)
-
-PROMPTS_DIR = Path(__file__).parent / "prompts"
-
-MAX_RETRIES = 5
-MAX_AGENT_TURNS = 20
+_PROMPTS = Path(__file__).parent / "prompts"
 
 
-@lru_cache
 def _load_prompt(name: str) -> str:
-    return (PROMPTS_DIR / f"{name}.md").read_text()
+    return (_PROMPTS / name).read_text()
 
 
-def _get_client() -> anthropic.AsyncAnthropic:
+def _get_client() -> OpenAI:
     settings = get_settings()
-    return anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    return OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=settings.openrouter_api_key,
+    )
 
 
-CREATE_BLOCK_TOOL = {
-    "name": "create_block",
-    "description": "Create a block from the writing with its questions. Call this once per block.",
-    "input_schema": CreateBlockInput.model_json_schema(),
-}
-
-QUESTIONS_TOOL = {
-    "name": "return_questions",
-    "description": "Return the generated questions.",
-    "input_schema": QuestionsResponse.model_json_schema(),
-}
-
-EVALUATION_TOOL = {
-    "name": "return_evaluation",
-    "description": "Return the evaluation score and feedback.",
-    "input_schema": EvaluationResponse.model_json_schema(),
-}
-
-
-async def _call_with_retry(coro_fn, *args, **kwargs):  # type: ignore[no-untyped-def]
-    """Call an async function with exponential backoff on rate limit errors."""
-    for attempt in range(MAX_RETRIES):
-        try:
-            return await coro_fn(*args, **kwargs)
-        except anthropic.RateLimitError:
-            if attempt == MAX_RETRIES - 1:
-                raise
-            wait = (2**attempt) + random.uniform(0, 1)
-            logger.warning(
-                "Rate limited — retrying in %.1fs (attempt %d/%d)",
-                wait,
-                attempt + 1,
-                MAX_RETRIES,
-            )
-            await asyncio.sleep(wait)
-
-
-async def create_blocks(text: str, num_questions: int) -> list[CreateBlockInput]:
-    """Agentic loop: LLM reads full text, creates blocks with questions via tool calls."""
+def create_blocks(text: str, num_questions: int = 2) -> list[CreateBlockInput]:
     client = _get_client()
     settings = get_settings()
 
-    messages: list[dict] = [
-        {
-            "role": "user",
-            "content": _load_prompt("create_blocks_user").format(
-                num_questions=num_questions, text=text
-            ),
-        },
-    ]
+    system = _load_prompt("create_blocks_system.md")
+    user = _load_prompt("create_blocks_user.md").format(
+        text=text, num_questions=num_questions
+    )
 
-    blocks: list[CreateBlockInput] = []
-
-    for turn in range(MAX_AGENT_TURNS):
-        logger.info("create_blocks turn %d — calling LLM...", turn + 1)
-        resp = await _call_with_retry(
-            client.messages.create,
-            model=settings.llm_model,
-            max_tokens=4096,
-            system=_load_prompt("create_blocks_system"),
-            messages=messages,
-            tools=[CREATE_BLOCK_TOOL],
-        )
-
-        # Collect tool calls from this turn
-        tool_uses = [b for b in resp.content if b.type == "tool_use"]
-
-        if not tool_uses:
-            logger.info(
-                "create_blocks — LLM done (no tool calls), total blocks: %d",
-                len(blocks),
-            )
-            break
-
-        for tool_use in tool_uses:
-            if tool_use.name == "create_block":
-                block = CreateBlockInput.model_validate(tool_use.input)
-                blocks.append(block)
-                logger.info(
-                    "create_blocks — block %d created (%d questions, %d chars)",
-                    len(blocks),
-                    len(block.questions),
-                    len(block.content),
-                )
-
-        # Send tool results back so the model can continue
-        messages.append({"role": "assistant", "content": resp.content})
-        messages.append(
+    response = client.chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        tools=[
             {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use.id,
-                        "content": "Block created.",
-                    }
-                    for tool_use in tool_uses
-                ],
+                "type": "function",
+                "function": {
+                    "name": "create_block",
+                    "description": "Create a block from the text with questions",
+                    "parameters": CreateBlockInput.model_json_schema(),
+                },
             }
-        )
+        ],
+    )
 
-        if resp.stop_reason == "end_turn":
-            logger.info(
-                "create_blocks — LLM signalled end_turn, total blocks: %d", len(blocks)
-            )
-            break
+    # Extract all tool calls from the response
+    blocks = []
+    if response.choices[0].message.tool_calls:
+        for tool_call in response.choices[0].message.tool_calls:
+            if not hasattr(tool_call, "function"):
+                continue
+            data = json.loads(tool_call.function.arguments)
+            blocks.append(CreateBlockInput(**data))
 
     return blocks
 
 
-async def generate_questions(
-    content: str,
-    num_questions: int,
-    existing_questions: list[str] | None = None,
+def generate_questions(
+    content: str, num_questions: int = 2, existing_questions: list[str] | None = None
 ) -> list[str]:
-    """Generate additional questions for an existing block."""
-    logger.info("generate_questions — requesting %d questions", num_questions)
     client = _get_client()
     settings = get_settings()
 
-    if existing_questions:
-        numbered = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(existing_questions))
-        existing_section = (
-            f"The following questions have already been asked. "
-            f"Do NOT repeat or rephrase any of them:\n{numbered}"
-        )
-    else:
-        existing_section = ""
-
-    resp = await _call_with_retry(
-        client.messages.create,
-        model=settings.llm_model,
-        max_tokens=1024,
-        system=_load_prompt("generate_questions_system"),
-        messages=[
-            {
-                "role": "user",
-                "content": _load_prompt("generate_questions_user").format(
-                    num_questions=num_questions,
-                    content=content,
-                    existing_questions_section=existing_section,
-                ),
-            },
-        ],
-        tools=[QUESTIONS_TOOL],
-        tool_choice={"type": "tool", "name": "return_questions"},
+    system = _load_prompt("generate_questions_system.md")
+    user = _load_prompt("generate_questions_user.md").format(
+        content=content,
+        num_questions=num_questions,
+        existing_questions_section=existing_questions,
     )
 
-    for block in resp.content:
-        if block.type == "tool_use" and block.name == "return_questions":
-            data = QuestionsResponse.model_validate(block.input)
-            return data.questions[:num_questions]
+    response = client.chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "generate_questions",
+                    "description": "Generate follow-up questions",
+                    "parameters": QuestionsResponse.model_json_schema(),
+                },
+            }
+        ],
+    )
 
-    return []
+    # Extract all tool calls from the response
+    blocks = []
+    if response.choices[0].message.tool_calls:
+        for tool_call in response.choices[0].message.tool_calls:
+            if not hasattr(tool_call, "function"):
+                continue
+            data = json.loads(tool_call.function.arguments)
+            blocks.extend(data["questions"])
+
+    return blocks
 
 
-async def evaluate_answer(
-    question: str, answer: str, context: str
-) -> EvaluationResponse:
-    """Evaluate an answer and return score + feedback."""
-    logger.info("evaluate_answer — scoring answer (%d chars)", len(answer))
+def evaluate_answer(question: str, answer: str, context: str) -> EvaluationResponse:
     client = _get_client()
     settings = get_settings()
 
-    resp = await _call_with_retry(
-        client.messages.create,
-        model=settings.llm_model,
-        max_tokens=1024,
-        system=_load_prompt("evaluate_answer_system"),
-        messages=[
-            {
-                "role": "user",
-                "content": _load_prompt("evaluate_answer_user").format(
-                    context=context, question=question, answer=answer
-                ),
-            },
-        ],
-        tools=[EVALUATION_TOOL],
-        tool_choice={"type": "tool", "name": "return_evaluation"},
+    system = _load_prompt("evaluate_answer_system.md")
+    user = _load_prompt("evaluate_answer_user.md").format(
+        question=question, answer=answer, context=context
     )
 
-    for block in resp.content:
-        if block.type == "tool_use" and block.name == "return_evaluation":
-            return EvaluationResponse.model_validate(block.input)
+    response = client.chat.completions.create(
+        model=settings.llm_model,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "evaluate_answer",
+                    "description": "Scores an answer 0-100",
+                    "parameters": EvaluationResponse.model_json_schema(),
+                },
+            }
+        ],
+    )
 
-    return EvaluationResponse(score=0, feedback="")
+    # Extract all tool calls from the response
+    if response.choices[0].message.tool_calls:
+        for tool_call in response.choices[0].message.tool_calls:
+            if not hasattr(tool_call, "function"):
+                continue
+            data = json.loads(tool_call.function.arguments)
+            data = EvaluationResponse(**data)
+    return data

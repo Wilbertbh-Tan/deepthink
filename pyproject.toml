@@ -18,3 +18,9 @@ dependencies = [
     "pytest-anyio>=0.0.0",
     "mypy>=1.19.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.5",
+]

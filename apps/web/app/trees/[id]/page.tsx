@@ -1,103 +1,48 @@
-"use client";
+"use client"
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
-import { Button } from "@workspace/ui/components/button";
-import { getTree, exportTree, type BlockTree } from "@/lib/api";
-import { TitleBlockView } from "@/components/title-block-view";
+import { useEffect, useState } from "react"
+import { useParams } from "next/navigation"
+import { getTree, BlockTree } from "../../../lib/api"
+import { Badge } from "@workspace/ui/components/badge"
+import TitleBlockView from "../../../components/title-block-view"
+import Link from "next/link"
 
-export default function TreePage() {
-  const { id } = useParams<{ id: string }>();
-  const [tree, setTree] = useState<BlockTree | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [exportPath, setExportPath] = useState("");
+export default function TreeDetail() {
+    const { id } = useParams()
+    const [tree, setTree] = useState<BlockTree | null>(null)
+    const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    getTree(id)
-      .then(setTree)
-      .finally(() => setLoading(false));
-  }, [id]);
+    useEffect(() => {
+        if (typeof id === "string") {
+            getTree(id).then(data => {
+                setTree(data)
+                setLoading(false)
+            })
+        }
+    }, [id])
 
-  async function handleExport() {
-    setExporting(true);
-    try {
-      const result = await exportTree(id);
-      setExportPath(result.path);
-    } finally {
-      setExporting(false);
-    }
-  }
+    if (loading) return <p className="text-muted-foreground">Loading...</p>
+    if (!tree) return <p className="text-red-500">Tree not found</p>
 
-  if (loading) {
     return (
-      <div className="flex min-h-svh items-center justify-center">
-        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
-      </div>
-    );
-  }
+        <div>
+            <Link href="/" className="text-muted-foreground hover:underline text-sm">
+                ← Back
+            </Link>
+            <div className="flex items-center gap-3 mt-4 mb-8">
+                <h1 className="text-3xl font-bold">{tree.title}</h1>
+                <Badge variant="outline">{tree.blocks.length} blocks</Badge>
+            </div>
 
-  if (!tree) {
-    return (
-      <div className="mx-auto max-w-3xl p-6">
-        <p className="text-muted-foreground">Tree not found.</p>
-        <Link href="/" className="text-sm underline">
-          Back to dashboard
-        </Link>
-      </div>
-    );
-  }
-
-  return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <Link
-          href="/"
-          className="text-muted-foreground inline-flex items-center gap-1 text-sm hover:underline"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Dashboard
-        </Link>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExport}
-          disabled={exporting}
-        >
-          {exporting ? (
-            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-          ) : (
-            <Download className="mr-1 h-3 w-3" />
-          )}
-          Export
-        </Button>
-      </div>
-
-      <h1 className="mb-1 text-2xl font-bold">{tree.title}</h1>
-      <p className="text-muted-foreground mb-6 text-xs">
-        {tree.blocks.length} blocks &middot; {tree.num_questions} questions per
-        block
-      </p>
-
-      {exportPath && (
-        <div className="bg-muted mb-4 rounded-md p-2 text-xs">
-          Exported to: <code>{exportPath}</code>
+            {tree.blocks.map((block, index) => (
+                <TitleBlockView
+                    key={block.id}
+                    block={block}
+                    treeId={tree.id}
+                    index={index}
+                    onTreeUpdate={setTree}
+                />
+            ))}
         </div>
-      )}
-
-      <div className="flex flex-col gap-6">
-        {tree.blocks.map((block, i) => (
-          <TitleBlockView
-            key={block.id}
-            block={block}
-            treeId={tree.id}
-            index={i}
-            onTreeUpdate={setTree}
-          />
-        ))}
-      </div>
-    </div>
-  );
+    )
 }
