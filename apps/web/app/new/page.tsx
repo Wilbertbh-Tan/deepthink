@@ -19,7 +19,7 @@ export default function NewTreePage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
-  const [numQuestions, setNumQuestions] = useState(2);
+  const [numQuestions, setNumQuestions] = useState("2");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -30,7 +30,7 @@ export default function NewTreePage() {
     setLoading(true);
     setError("");
     try {
-      const tree = await createTree(title, text, numQuestions);
+      const tree = await createTree(title, text, Number(numQuestions) || 2);
       router.push(`/trees/${tree.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create tree");
@@ -84,7 +84,7 @@ export default function NewTreePage() {
                 min={1}
                 max={10}
                 value={numQuestions}
-                onChange={(e) => setNumQuestions(Number(e.target.value))}
+                onChange={(e) => setNumQuestions(e.target.value)}
                 className="w-24"
               />
             </div>
